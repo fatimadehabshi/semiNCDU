@@ -31,8 +31,78 @@ struct data {
     int smallest_file_set;  // Flag to indicate if smallest_file.size has been set
     pthread_mutex_t mutex;  // Mutex for synchronization
 };
-void nDepth(const char *path, struct data *shared_data){
-    
+// Function to calculate file size and update FileInfo structure
+void calculateFileSize(FileInfo *fileInfo) {
+    struct stat fileStat;
+    if (stat(fileInfo->filename, &fileStat) == -1) {
+        perror("Error getting file information");
+        exit(EXIT_FAILURE);
+    }
+    fileInfo->size = fileStat.st_size;
+}
+
+// Thread function to calculate file size
+void *calculateFileSizeThread(void *arg) {
+    FileInfo *fileInfo = (struct FileInfo *)arg;
+    calculateFileSize(fileInfo);
+    return NULL;
+}
+void analyzeFile(const char *dirPath, struct data *shared_data) {
+    DIR *dir;
+    struct dirent *entry;
+
+    // Open directory
+    dir = opendir(dirPath);
+    if (!dir) {
+        perror("Error opening directory");
+        exit(EXIT_FAILURE);
+    }
+
+    pthread_t threads[1024]; // Assuming a maximum of 1024 threads
+    FileInfo fileInfos[1024]; // Assuming a maximum of 1024 files
+
+    int numFiles = 0;
+    // Read directory entries
+    while ((entry = readdir(dir)) != NULL) {
+        // Ignore current and parent directory entries
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+        // Construct the full path of the file
+        snprintf(fileInfos[numFiles].filename, sizeof(fileInfos[numFiles].filename), "%s/%s", dirPath, entry->d_name);
+        // Create thread for each file to calculate file size
+        if (pthread_create(&threads[numFiles], NULL, calculateFileSizeThread, &fileInfos[numFiles]) != 0) {
+            perror("Error creating thread");
+            exit(EXIT_FAILURE);
+        }
+        printf("Thread %d is analyzing directory: %s\n", getpid(), fileInfos[numFiles].filename);
+        numFiles++;
+    }
+    // Wait for all threads to finish
+    for (int i = 0; i < numFiles; i++) {
+        if (pthread_join(threads[i], NULL) != 0) {
+            perror("Error joining thread");
+            exit(EXIT_FAILURE);
+        }
+    }
+    for (int i = 0; i < numFiles; i++) {
+        shared_data->final_size += fileInfos[i].size;
+        shared_data->total_files++;
+        if (fileInfos[i].size > shared_data->largest_file.size) {
+            pthread_mutex_lock(&shared_data->mutex);
+            shared_data->largest_file.size = fileInfos[i].size;
+            strcpy(shared_data->largest_file.filename, fileInfos[i].filename);
+            pthread_mutex_unlock(&shared_data->mutex);
+        }
+
+        if (!shared_data->smallest_file_set || fileInfos[i].size < shared_data->smallest_file.size) {
+            pthread_mutex_lock(&shared_data->mutex);
+            shared_data->smallest_file.size = fileInfos[i].size;
+            strcpy(shared_data->smallest_file.filename, fileInfos[i].filename);
+            shared_data->smallest_file_set = 1;
+            pthread_mutex_unlock(&shared_data->mutex);
+        }
+    }
 }
 void firstDepth(const char *path, struct data *shared_data) {
     DIR *dir;
@@ -68,14 +138,7 @@ void firstDepth(const char *path, struct data *shared_data) {
                 pthread_mutex_lock(&shared_data->mutex);
                 shared_data->total_folders++;
                 pthread_mutex_unlock(&shared_data->mutex);
-                
-//                pthread_t thread;
-//                struct data *subfolder_data = malloc(sizeof(struct data));
-//                snprintf(subfolder_data->path, sizeof(subfolder_data->path), "%s/%s", data->path, entry->d_name);
-//                pthread_create(&thread, NULL, thread_function, subfolder_data);
-//                pthread_join(thread, NULL);
-//                free(subfolder_data);
-                
+                analyzeFile(child_path, shared_data);
                 // Close the directory and exit
                 closedir(dir);
                 break;
