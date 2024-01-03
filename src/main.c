@@ -25,11 +25,10 @@ typedef struct {
     struct data* data;
 } FolderInfo;
 
-struct FileType {
+typedef struct {
     char extension[10];  // adjust the size based on your needs
     int count;
-    struct FileType *next;
-};
+}FileType ;
 
 // Structure to store data (thread or process)
 struct data {
@@ -38,12 +37,12 @@ struct data {
     FileInfo largest_file;
     FileInfo smallest_file;
     long total_files;       // Added member for total number of files
-    long num_file_types;    // Added member for number of types of files
+    int num_file_types;    // Added member for number of types of files
     long total_folders;     // Added member for total number of folders
     off_t final_size;       // Added member for final size of the root folder
     int smallest_file_set;  // Flag to indicate if smallest_file.size has been set
     pthread_mutex_t mutex;  // Mutex for synchronization
-    struct FileType *head;
+    FileType fileTypes[MAX_FILES];
 };
 
 void analyzeFolder(const char *dirPath, struct data *shared_data);
@@ -59,6 +58,26 @@ void *threadAnalyze(void *arg) {
     printf("Thread %lu is analyzing folder: %s\n", (unsigned long)tid, folderInfo->path);
     analyzeFolder(folderInfo->path, folderInfo->data);
     return NULL;
+}
+char *getType(const char *filePath){
+    char *splitName = strrchr(filePath, '.');
+    if(!splitName || splitName == filePath)
+        return "";
+    return splitName + 1;
+}
+void addType(FileType* fType, char* type, int* len){
+    for(int i = 0; i  < (*len); i++){
+        if(strcmp(fType[i].extension, type) == 0){
+            fType[i].count++;
+            //printf("test\n");
+            return;
+        }
+    }
+    FileType ft;
+    ft.count = 1;
+    strcpy(ft.extension, type);
+    fType[*len] = ft;
+    (*len)++;
 }
 void analyzeFolder(const char *dirPath, struct data *shared_data) {
     DIR *dir;
@@ -143,34 +162,7 @@ void analyzeFile(const char *path, struct data *shared_data) {
             strcpy(shared_data->smallest_file.filename, file_path);
             shared_data->smallest_file_set = 1;  // Set the flag
         }
-        char *dot = strrchr(file_path, '.'); // Find the last dot in the file path
-        char extension[10];
-        int add = 0;
-        if (dot != NULL) {
-            strcpy(extension, dot + 1);
-            struct FileType *current = shared_data->head;
-            while (current != NULL) {
-                if (strcmp(current->extension, extension) == 0) {
-                    // Extension found, update the count and return the head
-                    current->count++;
-                    add = 1;
-                    break;
-                }
-                current = current->next;
-            }
-            // Extension not found, add a new node to the list
-            if (!add) {
-                struct FileType *newFileType = (struct FileType *)malloc(sizeof(struct FileType));
-                if (newFileType == NULL) {
-                    // Handle memory allocation failure
-                    exit(1);
-                }
-                strcpy(newFileType->extension, extension);
-                newFileType->count = 1;
-                newFileType->next = shared_data->head;
-                shared_data->head = newFileType;
-            }
-        }
+        addType(shared_data->fileTypes, getType(file_path), &shared_data->num_file_types);
         // Unlock the mutex after updating shared data
         pthread_mutex_unlock(&shared_data->mutex);
     }
@@ -214,7 +206,7 @@ void firstDepth(const char *path, struct data *shared_data) {
                 break;
             }
         }
-        // Check if it's a regular file
+            // Check if it's a regular file
         else if (stat(file_path, &file_stat) == 0 && S_ISREG(file_stat.st_mode)) {
             analyzeFile(file_path, shared_data);
         }
@@ -235,7 +227,6 @@ int main(int argc, char *argv[]){
 
     strcpy(shared_data->path, argv[1]);
     shared_data->total_folders = 0;  // Initialize total_folders to 0
-    shared_data->head = NULL;
     pthread_mutex_init(&shared_data->mutex, NULL);
 
     // Call the function to count folders and spawn threads for file analysis
@@ -243,18 +234,15 @@ int main(int argc, char *argv[]){
 
     // Display results
     printf("Total number of files: %ld\n", shared_data->total_files);
-    printf("Number of types of files: %ld\n", shared_data->num_file_types);
+    printf("Number of types of files: %d\n", shared_data->num_file_types);
     printf("Largest file: %s, Size: %ld bytes\n", shared_data->largest_file.filename, shared_data->largest_file.size);
     printf("Smallest file: %s, Size: %ld bytes\n", shared_data->smallest_file.filename, shared_data->smallest_file.size);
     printf("Final size of the root folder: %ld bytes\n", shared_data->final_size);
     for (int i = 0; i < shared_data->total_files; ++i) {
         printf("file %d: size: %ld bytes path: %s\n", i+1, shared_data->file_infos[i].size, shared_data->file_infos[i].filename);
     }
-    struct FileType *current = shared_data->head;
-
-    while (current != NULL) {
-        printf("%s: %d\n", current->extension, current->count);
-        current = current->next;
+    for (int i = 0; i < shared_data->num_file_types; ++i) {
+        printf("%s: %d\n", shared_data->fileTypes[i].extension, shared_data->fileTypes[i].count);
     }
     // Cleanup: close shared memory and unlink
     munmap(shared_data, sizeof(struct data));
