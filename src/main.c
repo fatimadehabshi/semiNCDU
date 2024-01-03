@@ -15,13 +15,13 @@
 
 // Structure to store file statistics
 typedef struct {
-    char filename[256];
+    char filename[MAX_PATH_LENGTH];
     off_t size;
 } FileInfo;
 
 // Structure to store file statistics
 typedef struct {
-    char path[256];
+    char path[MAX_PATH_LENGTH];
     struct data* data;
 } FolderInfo;
 
@@ -52,10 +52,8 @@ void analyzeFile(const char *path, struct data *shared_data);
 void *threadAnalyze(void *arg) {
     FolderInfo *folderInfo = (FolderInfo *)arg;
     pthread_t tid = pthread_self();
-    DIR *dir;
-    struct dirent *entry;
-    struct stat file_stat;
     printf("Thread %lu is analyzing folder: %s\n", (unsigned long)tid, folderInfo->path);
+    printf("********************\n");
     analyzeFolder(folderInfo->path, folderInfo->data);
     return NULL;
 }
@@ -128,8 +126,6 @@ void analyzeFolder(const char *dirPath, struct data *shared_data) {
             exit(EXIT_FAILURE);
         }
     }
-
-    // Free dynamically allocated memory
     free(folderInfos);
 }
 void analyzeFile(const char *path, struct data *shared_data) {
@@ -197,13 +193,14 @@ void firstDepth(const char *path, struct data *shared_data) {
                 char child_path[512];
                 snprintf(child_path, sizeof(child_path), "%s/%s", path, entry->d_name);
                 printf("Process %d is analyzing directory: %s\n", getpid(), child_path);
+                printf("----------------------\n");
                 pthread_mutex_lock(&shared_data->mutex);
                 shared_data->total_folders++;
                 pthread_mutex_unlock(&shared_data->mutex);
                 analyzeFolder(child_path, shared_data);
                 // Close the directory and exit
                 closedir(dir);
-                break;
+                exit(EXIT_SUCCESS);
             }
         }
             // Check if it's a regular file
@@ -214,6 +211,19 @@ void firstDepth(const char *path, struct data *shared_data) {
     while(wait(NULL) != -1);
     // Close the directory
     closedir(dir);
+}
+void printResult(struct data *shared_data){
+    printf("Total number of files: %ld\n", shared_data->total_files);
+    printf("Number of types of files: %d\n", shared_data->num_file_types);
+    printf("Largest file: %s, Size: %ld bytes\n", shared_data->largest_file.filename, shared_data->largest_file.size);
+    printf("Smallest file: %s, Size: %ld bytes\n", shared_data->smallest_file.filename, shared_data->smallest_file.size);
+    printf("Final size of the root folder: %ld bytes\n", shared_data->final_size);
+    for (int i = 0; i < shared_data->total_files; ++i) {
+        printf("file %d: size: %ld bytes path: %s\n", i+1, shared_data->file_infos[i].size, shared_data->file_infos[i].filename);
+    }
+    for (int i = 0; i < shared_data->num_file_types; ++i) {
+        printf("%s: %d\n", shared_data->fileTypes[i].extension, shared_data->fileTypes[i].count);
+    }
 }
 int main(int argc, char *argv[]){
     if (argc != 2) {
@@ -233,17 +243,7 @@ int main(int argc, char *argv[]){
     firstDepth(shared_data->path, shared_data);
 
     // Display results
-    printf("Total number of files: %ld\n", shared_data->total_files);
-    printf("Number of types of files: %d\n", shared_data->num_file_types);
-    printf("Largest file: %s, Size: %ld bytes\n", shared_data->largest_file.filename, shared_data->largest_file.size);
-    printf("Smallest file: %s, Size: %ld bytes\n", shared_data->smallest_file.filename, shared_data->smallest_file.size);
-    printf("Final size of the root folder: %ld bytes\n", shared_data->final_size);
-    for (int i = 0; i < shared_data->total_files; ++i) {
-        printf("file %d: size: %ld bytes path: %s\n", i+1, shared_data->file_infos[i].size, shared_data->file_infos[i].filename);
-    }
-    for (int i = 0; i < shared_data->num_file_types; ++i) {
-        printf("%s: %d\n", shared_data->fileTypes[i].extension, shared_data->fileTypes[i].count);
-    }
+    printResult(shared_data);
     // Cleanup: close shared memory and unlink
     munmap(shared_data, sizeof(struct data));
     close(shared_memory_fd);
