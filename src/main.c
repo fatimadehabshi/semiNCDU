@@ -130,7 +130,6 @@ void firstDepth(const char *path, struct data *shared_data) {
         fprintf(stderr, "Unable to open directory %s\n", path);
         exit(EXIT_FAILURE);
     }
-
     // Count the folders in the directory
     while ((entry = readdir(dir)) != NULL) {
         char file_path[MAX_PATH_LENGTH];
@@ -154,13 +153,9 @@ void firstDepth(const char *path, struct data *shared_data) {
                 // Close the directory and exit
                 closedir(dir);
                 break;
-            } else {
-                // Parent process
-                // Wait for the child process to finish
-                waitpid(childProcessID, NULL, 0);
             }
         }
-            // Check if it's a regular file
+        // Check if it's a regular file
         else if (stat(file_path, &file_stat) == 0 && S_ISREG(file_stat.st_mode)) {
             // Update total number of files
             // Lock the mutex before accessing shared data
@@ -191,6 +186,7 @@ void firstDepth(const char *path, struct data *shared_data) {
             pthread_mutex_unlock(&shared_data->mutex);
         }
     }
+    while(wait(NULL) != -1);
     // Close the directory
     closedir(dir);
 }
